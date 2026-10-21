@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Praca</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;background:#111827;color:white;font-family:Arial,sans-serif;padding:20px}
+.container{width:min(900px,100%);background:#1f2937;padding:30px;border-radius:20px;box-shadow:0 20px 50px rgba(0,0,0,.4)}
+h1,h2{text-align:center;margin-top:0}h1{margin-bottom:25px}
+.inputs{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+label{display:block;margin-bottom:7px;color:#9ca3af;font-size:14px}
+input{width:100%;padding:12px;border:1px solid #374151;border-radius:10px;background:#111827;color:white;font-size:17px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:20px}
+.stat{background:#111827;padding:15px 10px;border-radius:12px;text-align:center}
+.stat-title{color:#9ca3af;font-size:13px;margin-bottom:7px}.stat-value{font-size:22px;font-weight:bold}
+.counter{text-align:center;font-size:80px;font-weight:bold;margin-top:30px}
+.result{text-align:center;font-size:32px;font-weight:bold;margin:8px auto 0;width:max-content;max-width:100%;padding:8px 18px;border-radius:12px;color:white;background:transparent;box-shadow:none;border:1px solid transparent}.result.task-active{color:#86efac;background:rgba(22,163,74,.16);box-shadow:0 0 18px rgba(34,197,94,.22);border-color:rgba(34,197,94,.35)}
+.last-interval{text-align:center;font-size:30px;font-weight:bold;margin-top:20px}
+.last-label{text-align:center;color:#9ca3af;font-size:13px;margin-top:5px}
+.average{text-align:center;color:#9ca3af;font-size:14px;margin-top:15px;margin-bottom:25px}.average strong{color:white}
+.buttons{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
+button{min-width:120px;padding:14px 20px;border:none;border-radius:10px;color:white;font-size:18px;font-weight:bold;cursor:pointer}
+button:active{transform:scale(.97)}.minus{background:#dc2626}.minus:hover{background:#b91c1c}.plus{background:#16a34a}.plus:hover{background:#15803d}
+.reset{display:flex;justify-content:center;margin-top:15px}.reset button{background:#3b82f6;min-width:150px;font-size:16px}
+.hint{text-align:center;color:#9ca3af;font-size:13px;margin-top:15px}
+.task-panel{margin-top:28px;padding:18px;background:#111827;border-radius:14px}.task-controls{display:flex;gap:10px;align-items:end;justify-content:center;flex-wrap:wrap}.task-controls>div{width:140px}.task-controls button{background:#7c3aed}.task-controls button:disabled{opacity:.45;cursor:not-allowed}.task-status{text-align:center;color:#c4b5fd;margin-top:12px;font-weight:bold}.offtask-panel{margin-top:32px;padding-top:24px;border-top:1px solid #374151}
+.status{padding:12px;border-radius:10px;background:#111827;text-align:center;margin-bottom:15px;color:#d1d5db}
+.status.active{color:#fca5a5;border:1px solid #dc2626}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px;min-width:560px}
+th,td{padding:11px 9px;text-align:left;border-bottom:1px solid #374151}
+th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
+.table-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:15px}
+.table-actions button{font-size:14px;min-width:130px;padding:11px 14px;background:#374151}
+.table-actions .clear-history{background:#991b1b}
+.empty{text-align:center;color:#9ca3af;padding:18px}
+@media(max-width:500px){.inputs,.stats{grid-template-columns:1fr}.container{padding:20px}.counter{font-size:60px}.result{font-size:28px}.buttons button{min-width:100px}}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Praca</h1>
+  <div class="inputs">
+    <div><label for="startDate">Data</label><input type="date" id="startDate"></div>
+    <div><label for="startTime">Godzina</label><input type="time" id="startTime"></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="stat-title">Czas Pracy</div><div class="stat-value" id="elapsed">0,00 h</div></div>
+    <div class="stat"><div class="stat-title">Licznik</div><div class="stat-value" id="counterSmall">0</div></div>
+    <div class="stat"><div class="stat-title">Wynik</div><div class="stat-value" id="rateSmall">0,00/h</div></div>
+  </div>
+  <div class="counter" id="counter">0</div>
+  <div class="result" id="result">0,00 / h</div>
+  <div class="last-interval" id="lastInterval">—</div>
+  <div class="last-label">Czas od ostatniego naciśnięcia</div>
+  <div class="average">Średnia <strong id="averageInterval">—</strong></div>
+  <div class="buttons">
+    <button class="minus" id="minusButton">−1</button>
+    <button class="plus" id="plusButton">+1</button>
+  </div>
+  <div class="reset"><button id="resetButton">Reset licznika</button></div>
+  <div class="hint">Naciśnij SPACJĘ lub +1. Po 3 minutach bez naciśnięcia zapisze się OFF-TASK. Naciśnij T, aby rozpocząć TASK.</div>
+
+
+
+  <section class="task-panel" aria-label="Tryb TASK">
+    <h2>Tryb TASK</h2>
+    <div class="task-controls">
+      <div><label for="taskMinutes">Czas tasku (minuty)</label><input type="number" id="taskMinutes" min="1" max="480" value="15"></div>
+      <button id="startTaskButton" type="button">Start TASK</button>
+      <button id="finishTaskButton" type="button" disabled>Zakończ TASK</button>
+    </div>
+    <div class="task-status" id="taskStatus" role="status">Ustaw czas i kliknij „Start TASK”.</div>
+  </section>
+
+  <section class="offtask-panel">
+    <h2>Historia OFF-TASK</h2>
+    <div class="status" id="offTaskStatus" role="status">Monitorowanie aktywne. Czekam na pierwsze naciśnięcie.</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Początek</th><th>Koniec</th><th>Czas OFF-TASK</th><th>Status</th></tr></thead>
+        <tbody id="offTaskTable"><tr><td colspan="5" class="empty">Brak zdarzeń OFF-TASK.</td></tr></tbody>
+      </table>
+    </div>
+    <div class="table-actions">
+      <button id="exportButton">Eksportuj CSV</button>
+      <button class="clear-history" id="clearHistoryButton">Usuń historię</button>
+    </div>
+  </section>
+</div>
+<script>
+const startDate=document.getElementById("startDate");
+const startTime=document.getElementById("startTime");
+const counterElement=document.getElementById("counter");
+const counterSmall=document.getElementById("counterSmall");
+const elapsedElement=document.getElementById("elapsed");
+const resultElement=document.getElementById("result");
+const rateSmall=document.getElementById("rateSmall");
+const lastIntervalElement=document.getElementById("lastInterval");
+const averageIntervalElement=document.getElementById("averageInterval");
+const plusButton=document.getElementById("plusButton");
+const minusButton=document.getElementById("minusButton");
+const resetButton=document.getElementById("resetButton");
+const offTaskStatus=document.getElementById("offTaskStatus");
+const offTaskTable=document.getElementById("offTaskTable");
+const taskMinutesInput=document.getElementById("taskMinutes");
+const startTaskButton=document.getElementById("startTaskButton");
+const finishTaskButton=document.getElementById("finishTaskButton");
+const taskStatus=document.getElementById("taskStatus");
+
+const IDLE_LIMIT=3*60*1000;
+const STORAGE_KEY="praca_offtask_events_v1";
+let counter=0;
+let lastPressTime=null;
+let totalInterval=0;
+let intervalCount=0;
+let offTaskEvents=loadEvents();
+let openOffTaskId=(offTaskEvents.find(event=>!event.end)||{}).id||null;
+let monitorStartedAt=Date.now();
+let hasRegisteredPress=false;
+let restoredIdleState=false;
+let taskStartedAt=null;
+let taskEndsAt=null;
+let taskRemainingBeforePause=0;
+let taskPaused=false;
+let taskTimerHandle=null;
+let frozenResultText=null;
+let taskElapsedTotal=0;
+
+function loadEvents(){
+  try{
+    const data=JSON.parse(localStorage.getItem(STORAGE_KEY)||"[]");
+    return Array.isArray(data)?data:[];
+  }catch(e){return []}
+}
+function saveEvents(){
+  try{localStorage.setItem(STORAGE_KEY,JSON.stringify(offTaskEvents))}
+  catch(e){offTaskStatus.textContent="Nie udało się zapisać historii w pamięci przeglądarki."}
+}
+function setDefaultDateTime(){
+  const now=new Date();
+  startDate.value=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
+  startTime.value="07:00";
+}
+function getStartDate(){
+  if(!startDate.value||!startTime.value)return null;
+  const [year,month,day]=startDate.value.split("-").map(Number);
+  const [hours,minutes]=startTime.value.split(":").map(Number);
+  return new Date(year,month-1,day,hours,minutes,0);
+}
+function formatInterval(ms){
+  const seconds=Math.max(0,Math.floor(ms/1000));
+  if(seconds<60)return (ms/1000).toFixed(1).replace(".",",")+" s";
+  const minutes=Math.floor(seconds/60);
+  const remainingSeconds=seconds%60;
+  if(minutes<60)return minutes+" min "+remainingSeconds+" s";
+  const hours=Math.floor(minutes/60);
+  return hours+" godz. "+(minutes%60)+" min "+remainingSeconds+" s";
+}
+function formatDateTime(timestamp){
+  return new Date(timestamp).toLocaleString("pl-PL",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"});
+}
+function renderEvents(){
+  offTaskTable.innerHTML="";
+  if(offTaskEvents.length===0){
+    offTaskTable.innerHTML='<tr><td colspan="5" class="empty">Brak zdarzeń OFF-TASK.</td></tr>';
+    return;
+  }
+  offTaskEvents.slice().reverse().forEach((event,index)=>{
+    const row=document.createElement("tr");
+    const values=[
+      String(offTaskEvents.length-index),
+      formatDateTime(event.start),
+      event.end?formatDateTime(event.end):"—",
+      formatInterval((event.end||Date.now())-event.start),
+      event.end?"Zakończone":"W trakcie"
+    ];
+    values.forEach(value=>{
+      const cell=document.createElement("td");
+      cell.textContent=value;
+      row.appendChild(cell);
+    });
+    offTaskTable.appendChild(row);
+  });
+}
+function getOpenEvent(){
+  return offTaskEvents.find(event=>event.id===openOffTaskId&&!event.end);
+}
+function startOffTask(startTimestamp){
+  if(getOpenEvent())return;
+  const event={id:String(startTimestamp)+"-"+Math.random().toString(36).slice(2,8),start:startTimestamp,end:null};
+  offTaskEvents.push(event);
+  openOffTaskId=event.id;
+  saveEvents();
+  renderEvents();
+  offTaskStatus.classList.add("active");
+  offTaskStatus.textContent="OFF-TASK wykryty — bez naciśnięcia przez 3 minuty.";
+}
+function endOffTask(endTimestamp){
+  const event=getOpenEvent();
+  if(!event)return;
+  event.end=Math.max(event.start,endTimestamp);
+  openOffTaskId=null;
+  saveEvents();
+  renderEvents();
+  offTaskStatus.classList.remove("active");
+  offTaskStatus.textContent="OFF-TASK zakończony. Monitorowanie aktywne.";
+}
+function update(){
+  resultElement.classList.toggle("task-active", taskStartedAt!==null);
+  const start=getStartDate();
+  if(start){
+    let elapsedMs=Math.max(0,Date.now()-start.getTime());
+    const taskNow=(taskStartedAt!==null && !taskPaused) ? Math.max(0,Date.now()-taskStartedAt) : 0;
+    const workingMs=Math.max(0,elapsedMs-taskElapsedTotal-taskNow);
+    const hours=workingMs/3600000;
+    const result=hours>0?counter/hours:0;
+    elapsedElement.textContent=hours.toFixed(2).replace(".",",")+" h";
+    const resultText=result.toFixed(2).replace(".",",");
+    resultElement.textContent=resultText+" / h";
+    rateSmall.textContent=resultText+"/h";
+  }
+  counterElement.textContent=counter;
+  counterSmall.textContent=counter;
+  if(lastPressTime!==null){
+    const gap=Date.now()-lastPressTime;
+    lastIntervalElement.textContent=formatInterval(gap);
+    if(gap>=IDLE_LIMIT&&!getOpenEvent()){
+      startOffTask(lastPressTime+IDLE_LIMIT);
+    }
+  }else if(!hasRegisteredPress){
+    const gap=Date.now()-monitorStartedAt;
+    lastIntervalElement.textContent=formatInterval(gap);
+    if(gap>=IDLE_LIMIT&&!getOpenEvent()&&!restoredIdleState){
+      startOffTask(monitorStartedAt+IDLE_LIMIT);
+      restoredIdleState=true;
+    }
+  }
+  if(getOpenEvent()){
+    offTaskStatus.classList.add("active");
+    offTaskStatus.textContent="OFF-TASK trwa: "+formatInterval(Date.now()-getOpenEvent().start);
+  }
+}
+function registerActivity(){
+  const now=Date.now();
+  if(getOpenEvent())endOffTask(now);
+  if(lastPressTime!==null){
+    const interval=now-lastPressTime;
+    totalInterval+=interval;
+    intervalCount++;
+    averageIntervalElement.textContent=formatInterval(totalInterval/intervalCount);
+  }
+  lastPressTime=now;
+  hasRegisteredPress=true;
+  monitorStartedAt=now;
+}
+function addOne(){
+  registerActivity();
+  counter++;
+  update();
+}
+function removeOne(){
+  registerActivity();
+  if(counter>0)counter--;
+  update();
+}
+document.addEventListener("keydown",function(event){
+  const target=event.target;
+  if(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement)return;
+  if((event.key==="t"||event.key==="T")&&!event.repeat){
+    event.preventDefault();
+    if(taskStartedAt===null)startTaskButton.click();
+    return;
+  }
+  if(event.code==="Space"&&!event.repeat){
+    event.preventDefault();
+    addOne();
+  }
+});
+plusButton.addEventListener("click",addOne);
+minusButton.addEventListener("click",removeOne);
+resetButton.addEventListener("click",function(){
+  counter=0;lastPressTime=null;totalInterval=0;intervalCount=0;
+  lastIntervalElement.textContent="—";
+  averageIntervalElement.textContent="—";
+  hasRegisteredPress=false;
+  monitorStartedAt=Date.now();
+  restoredIdleState=false;
+  update();
+});
+function changeDateTime(){
+  counter=0;lastPressTime=null;totalInterval=0;intervalCount=0;taskElapsedTotal=0;
+  lastIntervalElement.textContent="—";
+  averageIntervalElement.textContent="—";
+  hasRegisteredPress=false;
+  monitorStartedAt=Date.now();
+  restoredIdleState=false;
+  update();
+}
+startDate.addEventListener("change",changeDateTime);
+startTime.addEventListener("change",changeDateTime);
+document.getElementById("clearHistoryButton").addEventListener("click",function(){
+  if(!confirm("Na pewno usunąć całą historię OFF-TASK?"))return;
+  offTaskEvents=[];
+  openOffTaskId=null;
+  saveEvents();
+  renderEvents();
+  offTaskStatus.classList.remove("active");
+  offTaskStatus.textContent="Historia wyczyszczona. Monitorowanie aktywne.";
+});
+document.getElementById("exportButton").addEventListener("click",function(){
+  const rows=[["Nr","Początek","Koniec","Czas OFF-TASK","Status"]];
+  offTaskEvents.forEach((event,index)=>{
+    rows.push([index+1,formatDateTime(event.start),event.end?formatDateTime(event.end):"",formatInterval((event.end||Date.now())-event.start),event.end?"Zakończone":"W trakcie"]);
+  });
+  const csv="\uFEFF"+rows.map(row=>row.map(value=>'"'+String(value).replace(/"/g,'""')+'"').join(";")).join("\r\n");
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8;"}));
+  const a=document.createElement("a");
+  a.href=url;a.download="historia-off-task.csv";a.click();
+  URL.revokeObjectURL(url);
+});
+function finishTask(manual=false){
+  if(taskStartedAt===null)return;
+  const now=Date.now();
+  taskElapsedTotal+=Math.max(0,now-taskStartedAt);
+  taskStartedAt=null;
+  taskEndsAt=null;
+  taskPaused=false;
+  startTaskButton.disabled=false;
+  finishTaskButton.disabled=true;
+  taskStatus.textContent=manual ? "TASK zakończony ręcznie. Wynik został wznowiony." : "Czas TASK minął. Wynik został wznowiony.";
+  update();
+}
+startTaskButton.addEventListener("click",function(){
+  if(taskStartedAt!==null)return;
+  const minutes=Math.floor(Number(taskMinutesInput.value));
+  if(!Number.isFinite(minutes)||minutes<1||minutes>480){
+    taskStatus.textContent="Wpisz czas od 1 do 480 minut.";
+    return;
+  }
+  if(getOpenEvent())endOffTask(Date.now());
+  taskStartedAt=Date.now();
+  taskEndsAt=taskStartedAt+minutes*60000;
+  taskPaused=false;
+  startTaskButton.disabled=true;
+  finishTaskButton.disabled=false;
+  taskStatus.textContent="TASK trwa: "+minutes+" min. Wynik jest wstrzymany.";
+  update();
+});
+finishTaskButton.addEventListener("click",()=>finishTask(true));
+function updateTaskDisplay(){
+  if(taskStartedAt===null)return;
+  const remaining=Math.max(0,taskEndsAt-Date.now());
+  const totalSeconds=Math.ceil(remaining/1000);
+  const mins=Math.floor(totalSeconds/60);
+  const secs=totalSeconds%60;
+  taskStatus.textContent="TASK trwa — pozostało "+mins+":"+String(secs).padStart(2,"0")+". Wynik jest wstrzymany.";
+  if(remaining<=0)finishTask(false);
+}
+setDefaultDateTime();
+renderEvents();
+update();
+setInterval(function(){updateTaskDisplay();update();},250);
+</script>
+</body>
+</html>
