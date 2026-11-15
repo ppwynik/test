@@ -410,7 +410,7 @@ let currentUsername="";
 let saveTimer=null;
 let isHydrating=false;
 function emailValue(){return document.getElementById("authEmail").value.trim().toLowerCase();}
-function validEmail(value){return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value);}
+function validEmail(value){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);}
 function showAuthMessage(message){authMessage.textContent=message;}
 function authRedirectUrl(){return window.location.origin+window.location.pathname;}
 async function registerAccount(){
