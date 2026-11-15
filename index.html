@@ -37,9 +37,34 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
 .table-actions .clear-history{background:#991b1b}
 .empty{text-align:center;color:#9ca3af;padding:18px}
 @media(max-width:500px){.inputs,.stats{grid-template-columns:1fr}.container{padding:20px}.counter{font-size:60px}.result{font-size:28px}.buttons button{min-width:100px}}
+
+.auth-panel{width:min(520px,100%);margin:0 auto;background:#1f2937;padding:28px;border-radius:18px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+.auth-panel h1{text-align:center;margin-top:0}.auth-panel p{color:#9ca3af;line-height:1.5}
+.auth-panel label{display:block;margin:12px 0 6px;color:#cbd5e1}.auth-panel input{width:100%;padding:12px;border:1px solid #374151;border-radius:10px;background:#111827;color:white;font-size:16px}
+.auth-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}.auth-actions button{flex:1;min-width:130px;font-size:15px;background:#2563eb}
+.auth-actions button.secondary{background:#374151}.auth-message{min-height:24px;margin-top:12px;color:#fbbf24;font-size:14px}.account-bar{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;color:#cbd5e1;font-size:14px}.account-bar button{background:#374151;min-width:auto;padding:9px 14px;font-size:14px}
+#appContent{display:none}.sync-state{font-size:12px;color:#9ca3af;text-align:right;margin-top:8px}
+
 </style>
 </head>
 <body>
+
+<section class="auth-panel" id="authPanel">
+  <h1>Praca — konto</h1>
+  <p>Utwórz konto lub zaloguj się nazwą użytkownika i hasłem. Twoje wyniki będą synchronizowane z bazą i dostępne na innych urządzeniach.</p>
+  <label for="authUsername">Nazwa użytkownika</label>
+  <input id="authUsername" autocomplete="username" maxlength="30" placeholder="np. jan_kowalski">
+  <label for="authPassword">Hasło (minimum 8 znaków)</label>
+  <input id="authPassword" type="password" autocomplete="current-password" minlength="8" placeholder="Hasło">
+  <div class="auth-actions">
+    <button id="registerButton" type="button">Utwórz konto</button>
+    <button id="loginButton" class="secondary" type="button">Zaloguj</button>
+  </div>
+  <div class="auth-message" id="authMessage" role="status"></div>
+</section>
+<div id="appContent">
+  <div class="account-bar"><span>Zalogowano jako <strong id="loggedUsername"></strong></span><button id="logoutButton" type="button">Wyloguj</button></div>
+
 <div class="container">
   <h1>Praca</h1>
   <div class="inputs">
@@ -90,6 +115,7 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
     </div>
   </section>
 </div>
+</div>
 <script>
 const startDate=document.getElementById("startDate");
 const startTime=document.getElementById("startTime");
@@ -138,6 +164,7 @@ function loadEvents(){
 function saveEvents(){
   try{localStorage.setItem(STORAGE_KEY,JSON.stringify(offTaskEvents))}
   catch(e){offTaskStatus.textContent="Nie udało się zapisać historii w pamięci przeglądarki."}
+  scheduleCloudSave();
 }
 function setDefaultDateTime(){
   const now=new Date();
@@ -209,6 +236,7 @@ function endOffTask(endTimestamp){
   offTaskStatus.textContent="OFF-TASK zakończony. Monitorowanie aktywne.";
 }
 function update(){
+  scheduleCloudSave();
   resultElement.classList.toggle("task-active", taskStartedAt!==null);
   const start=getStartDate();
   if(start){
@@ -362,7 +390,135 @@ function updateTaskDisplay(){
 setDefaultDateTime();
 renderEvents();
 update();
-setInterval(function(){updateTaskDisplay();update();},250);
+setInterval(function(){updateTaskDisplay();update();},1000);
+
+const SUPABASE_URL="https://xjhnomiaskiyygebjfmh.supabase.co";
+const SUPABASE_KEY="sb_publishable__FgbdkFbxsq_KtNYUoAc0Q_7_wM9sGR";
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const authPanel=document.getElementById("authPanel");
+const appContent=document.getElementById("appContent");
+const authMessage=document.getElementById("authMessage");
+let currentUser=null;
+let currentUsername="";
+let saveTimer=null;
+let isHydrating=false;
+function usernameToEmail(name){return name.toLowerCase()+"@users.praca.local";}
+function cleanUsername(value){return value.trim().toLowerCase();}
+function validUsername(value){return /^[a-z0-9_]{3,30}$/.test(value);}
+function showAuthMessage(message){authMessage.textContent=message;}
+async function registerAccount(){
+  const username=cleanUsername(document.getElementById("authUsername").value);
+  const password=document.getElementById("authPassword").value;
+  if(!validUsername(username)){showAuthMessage("Nazwa: 3–30 znaków, tylko litery a-z, cyfry i podkreślenie.");return;}
+  if(password.length<8){showAuthMessage("Hasło musi mieć co najmniej 8 znaków.");return;}
+  showAuthMessage("Tworzenie konta…");
+  const {data,error}=await sb.auth.signUp({email:usernameToEmail(username),password,options:{data:{username}}});
+  if(error){showAuthMessage(error.message);return;}
+  if(!data.session){showAuthMessage("Konto utworzone. W projekcie Supabase wyłącz potwierdzanie e-maili (Authentication → Providers → Email → Confirm email), ponieważ logowanie używa nazwy użytkownika.");return;}
+  await afterLogin(data.user,username);
+}
+async function loginAccount(){
+  const username=cleanUsername(document.getElementById("authUsername").value);
+  const password=document.getElementById("authPassword").value;
+  if(!validUsername(username)||!password){showAuthMessage("Wpisz poprawną nazwę użytkownika i hasło.");return;}
+  showAuthMessage("Logowanie…");
+  const {data,error}=await sb.auth.signInWithPassword({email:usernameToEmail(username),password});
+  if(error){showAuthMessage("Nie udało się zalogować. Sprawdź nazwę i hasło.");return;}
+  await afterLogin(data.user,username);
+}
+async function afterLogin(user,username){
+  currentUser=user;currentUsername=username;
+  const {error:profileError}=await sb.from("profiles").upsert({id:user.id,username},{onConflict:"id"});
+  if(profileError){showAuthMessage("Błąd profilu: "+profileError.message);return;}
+  document.getElementById("loggedUsername").textContent=username;
+  authPanel.style.display="none";appContent.style.display="block";
+  await loadCloudSession();
+  showSyncStatus("Synchronizacja aktywna");
+}
+function showSyncStatus(message){
+  let el=document.getElementById("syncStatus");
+  if(!el){el=document.createElement("div");el.id="syncStatus";el.className="sync-state";document.querySelector(".container").appendChild(el);}
+  el.textContent=message;
+}
+function snapshot(){
+  const start=getStartDate();
+  if(!start||!currentUser)return null;
+  const now=Date.now();
+  const taskNow=(taskStartedAt!==null&&!taskPaused)?Math.max(0,now-taskStartedAt):0;
+  const elapsed=Math.max(0,now-start.getTime());
+  const workingMs=Math.max(0,elapsed-taskElapsedTotal-taskNow);
+  const hours=workingMs/3600000;
+  return {
+    user_id:currentUser.id,nick:currentUsername,
+    data_startu:startDate.value,godzina_startu:startTime.value,
+    counter,czas_godzin:Number(hours.toFixed(4)),
+    wynik_na_godzine:Number((hours>0?counter/hours:0).toFixed(4)),
+    sredni_czas_miedzy_nacisnieciami:intervalCount?Number((totalInterval/intervalCount/1000).toFixed(3)):null,
+    average_interval_ms:intervalCount?Math.round(totalInterval/intervalCount):0,
+    last_press_at:lastPressTime?new Date(lastPressTime).toISOString():null,
+    total_interval_ms:totalInterval,interval_count:intervalCount,
+    task_elapsed_ms:taskElapsedTotal,
+    task_started_at:taskStartedAt?new Date(taskStartedAt).toISOString():null,
+    task_ends_at:taskEndsAt?new Date(taskEndsAt).toISOString():null,
+    off_task_events:offTaskEvents,
+    updated_at:new Date().toISOString()
+  };
+}
+function scheduleCloudSave(){
+  if(!currentUser||isHydrating)return;
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(saveCloudSession,900);
+}
+async function saveCloudSession(){
+  const row=snapshot();if(!row)return;
+  showSyncStatus("Zapisywanie…");
+  const {error}=await sb.from("wyniki").upsert(row,{onConflict:"user_id,data_startu,godzina_startu"});
+  if(error){showSyncStatus("Błąd synchronizacji: "+error.message);return;}
+  showSyncStatus("Zapisano · "+new Date().toLocaleTimeString("pl-PL"));
+}
+async function loadCloudSession(){
+  isHydrating=true;
+  const {data,error}=await sb.from("wyniki").select("*").eq("user_id",currentUser.id).order("created_at",{ascending:false}).limit(1);
+  if(error){isHydrating=false;showSyncStatus("Nie udało się pobrać danych: "+error.message);return;}
+  if(data&&data.length){
+    const row=data[0];
+    startDate.value=row.data_startu;startTime.value=String(row.godzina_startu).slice(0,5);
+    counter=Number(row.counter)||0;
+    totalInterval=Number(row.total_interval_ms)||0;
+    intervalCount=Number(row.interval_count)||0;
+    taskElapsedTotal=Number(row.task_elapsed_ms)||0;
+    lastPressTime=row.last_press_at?new Date(row.last_press_at).getTime():null;
+    offTaskEvents=Array.isArray(row.off_task_events)?row.off_task_events:[];
+    openOffTaskId=(offTaskEvents.find(event=>!event.end)||{}).id||null;
+    if(row.task_started_at&&row.task_ends_at&&new Date(row.task_ends_at).getTime()>Date.now()){
+      taskStartedAt=Date.now();
+      taskEndsAt=new Date(row.task_ends_at).getTime();
+      taskElapsedTotal+=Math.max(0,Date.now()-new Date(row.task_started_at).getTime());
+      taskPaused=false;startTaskButton.disabled=true;finishTaskButton.disabled=false;
+    }else{taskStartedAt=null;taskEndsAt=null;taskPaused=false;startTaskButton.disabled=false;finishTaskButton.disabled=true;}
+    monitorStartedAt=lastPressTime||Date.now();
+    hasRegisteredPress=lastPressTime!==null;
+    renderEvents();update();
+  }
+  isHydrating=false;
+  if(!data||!data.length)await saveCloudSession();
+}
+document.getElementById("registerButton").addEventListener("click",registerAccount);
+document.getElementById("loginButton").addEventListener("click",loginAccount);
+document.getElementById("logoutButton").addEventListener("click",async()=>{
+  await saveCloudSession();
+  await sb.auth.signOut();currentUser=null;currentUsername="";
+  appContent.style.display="none";authPanel.style.display="block";
+  showAuthMessage("Wylogowano.");
+});
+sb.auth.getSession().then(({data})=>{
+  if(data.session){
+    const user=data.session.user;
+    const username=user.user_metadata?.username||user.email?.split("@")[0]||"użytkownik";
+    afterLogin(user,username);
+  }
+});
+
 </script>
 </body>
 </html>
