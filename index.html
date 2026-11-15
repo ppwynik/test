@@ -50,23 +50,15 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
 <body>
 
 <section class="auth-panel" id="authPanel">
-  <h1>Praca — konto</h1>
-  <p>Zarejestruj się lub zaloguj adresem e-mail i hasłem. Wyniki będą synchronizowane między Twoimi urządzeniami.</p>
-  <label for="authEmail">Adres e-mail</label>
-  <input id="authEmail" type="email" autocomplete="email" maxlength="254" placeholder="np. jan@example.com" required>
-  <label for="authPassword">Hasło (minimum 8 znaków)</label>
-  <input id="authPassword" type="password" autocomplete="current-password" minlength="8" placeholder="Hasło">
+  <h1>Praca — wspólne dane</h1>
+  <p>Wpisz nazwę użytkownika, aby otworzyć wspólny zestaw danych na dowolnym urządzeniu.</p>
+  <p><strong>Uwaga: dane są publiczne.</strong> Każda osoba, która zna nazwę użytkownika, może je odczytać, zmieniać i usuwać. Nazwa nie jest hasłem ani zabezpieczeniem.</p>
+  <label for="sharedUsername">Nazwa użytkownika (3–32 znaki)</label>
+  <input id="sharedUsername" type="text" autocomplete="username" maxlength="32" placeholder="np. jan_kowalski" required>
   <div class="auth-actions">
-    <button id="registerButton" type="button">Utwórz konto</button>
-    <button id="loginButton" class="secondary" type="button">Zaloguj</button>
+    <button id="enterSharedButton" type="button">Otwórz dane</button>
   </div>
-  <div class="auth-actions"><button id="forgotPasswordButton" class="secondary" type="button">Nie pamiętam hasła</button></div>
   <div class="auth-message" id="authMessage" role="status" aria-live="polite"></div>
-  <div id="resetPasswordPanel" hidden>
-    <label for="newPassword">Nowe hasło</label>
-    <input id="newPassword" type="password" autocomplete="new-password" minlength="8" placeholder="Nowe hasło">
-    <div class="auth-actions"><button id="saveNewPasswordButton" type="button">Zapisz nowe hasło</button></div>
-  </div>
 </section>
 <div id="appContent">
   <div class="account-bar"><span>Zalogowano jako <strong id="loggedUsername"></strong></span><button id="logoutButton" type="button">Wyloguj</button></div>
@@ -243,7 +235,6 @@ function endOffTask(endTimestamp){
   offTaskStatus.textContent="OFF-TASK zakończony. Monitorowanie aktywne.";
 }
 function update(){
-  scheduleCloudSave();
   resultElement.classList.toggle("task-active", taskStartedAt!==null);
   const start=getStartDate();
   if(start){
@@ -295,11 +286,13 @@ function addOne(){
   registerActivity();
   counter++;
   update();
+  scheduleCloudSave();
 }
 function removeOne(){
   registerActivity();
   if(counter>0)counter--;
   update();
+  scheduleCloudSave();
 }
 document.addEventListener("keydown",function(event){
   const target=event.target;
@@ -324,6 +317,7 @@ resetButton.addEventListener("click",function(){
   monitorStartedAt=Date.now();
   restoredIdleState=false;
   update();
+  scheduleCloudSave();
 });
 function changeDateTime(){
   counter=0;lastPressTime=null;totalInterval=0;intervalCount=0;taskElapsedTotal=0;
@@ -333,6 +327,7 @@ function changeDateTime(){
   monitorStartedAt=Date.now();
   restoredIdleState=false;
   update();
+  scheduleCloudSave();
 }
 startDate.addEventListener("change",changeDateTime);
 startTime.addEventListener("change",changeDateTime);
@@ -367,6 +362,7 @@ function finishTask(manual=false){
   finishTaskButton.disabled=true;
   taskStatus.textContent=manual ? "TASK zakończony ręcznie. Wynik został wznowiony." : "Czas TASK minął. Wynik został wznowiony.";
   update();
+  scheduleCloudSave();
 }
 startTaskButton.addEventListener("click",function(){
   if(taskStartedAt!==null)return;
@@ -383,6 +379,7 @@ startTaskButton.addEventListener("click",function(){
   finishTaskButton.disabled=false;
   taskStatus.textContent="TASK trwa: "+minutes+" min. Wynik jest wstrzymany.";
   update();
+  scheduleCloudSave();
 });
 finishTaskButton.addEventListener("click",()=>finishTask(true));
 function updateTaskDisplay(){
@@ -405,76 +402,53 @@ const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const authPanel=document.getElementById("authPanel");
 const appContent=document.getElementById("appContent");
 const authMessage=document.getElementById("authMessage");
-let currentUser=null;
 let currentUsername="";
+let currentRowId=null;
 let saveTimer=null;
 let isHydrating=false;
-function emailValue(){return document.getElementById("authEmail").value.trim().toLowerCase();}
-function validEmail(value){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);}
+let sharedChannel=null;
 function showAuthMessage(message){authMessage.textContent=message;}
-function authRedirectUrl(){return window.location.origin+window.location.pathname;}
-async function registerAccount(){
-  const email=emailValue();
-  const password=document.getElementById("authPassword").value;
-  if(!validEmail(email)){showAuthMessage("Wpisz poprawny adres e-mail.");return;}
-  if(password.length<8){showAuthMessage("Hasło musi mieć co najmniej 8 znaków.");return;}
-  showAuthMessage("Tworzenie konta…");
-  const {data,error}=await sb.auth.signUp({email,password,options:{emailRedirectTo:authRedirectUrl(),data:{username:email}}});
-  if(error){showAuthMessage(error.message);return;}
-  if(!data.session){showAuthMessage("Konto utworzone. Wysłaliśmy wiadomość z linkiem aktywacyjnym. Kliknij link w e-mailu, a następnie wróć do aplikacji.");return;}
-  await afterLogin(data.user);
-}
-async function loginAccount(){
-  const email=emailValue();
-  const password=document.getElementById("authPassword").value;
-  if(!validEmail(email)||!password){showAuthMessage("Wpisz poprawny e-mail i hasło.");return;}
-  showAuthMessage("Logowanie…");
-  const {data,error}=await sb.auth.signInWithPassword({email,password});
-  if(error){showAuthMessage("Nie udało się zalogować. Sprawdź e-mail, hasło i czy konto zostało aktywowane.");return;}
-  await afterLogin(data.user);
-}
-async function requestPasswordReset(){
-  const email=emailValue();
-  if(!validEmail(email)){showAuthMessage("Najpierw wpisz adres e-mail, na który mamy wysłać link.");return;}
-  showAuthMessage("Wysyłanie wiadomości…");
-  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:authRedirectUrl()});
-  if(error){showAuthMessage(error.message);return;}
-  showAuthMessage("Jeśli konto istnieje, wysłaliśmy wiadomość z linkiem do ustawienia nowego hasła.");
-}
-async function saveNewPassword(){
-  const password=document.getElementById("newPassword").value;
-  if(password.length<8){showAuthMessage("Nowe hasło musi mieć co najmniej 8 znaków.");return;}
-  const {error}=await sb.auth.updateUser({password});
-  if(error){showAuthMessage("Nie udało się zmienić hasła: "+error.message);return;}
-  document.getElementById("resetPasswordPanel").hidden=true;
-  showAuthMessage("Hasło zostało zmienione. Możesz korzystać z aplikacji.");
-  const {data}=await sb.auth.getUser();
-  if(data.user)await afterLogin(data.user);
-}
-async function afterLogin(user){
-  currentUser=user;currentUsername=user.email||"konto";
-  const {error:profileError}=await sb.from("profiles").upsert({id:user.id,username:currentUsername},{onConflict:"id"});
-  if(profileError){showAuthMessage("Błąd profilu: "+profileError.message);return;}
-  document.getElementById("loggedUsername").textContent=currentUsername;
-  authPanel.style.display="none";appContent.style.display="block";
-  await loadCloudSession();
-  showSyncStatus("Synchronizacja aktywna");
-}
 function showSyncStatus(message){
   let el=document.getElementById("syncStatus");
   if(!el){el=document.createElement("div");el.id="syncStatus";el.className="sync-state";document.querySelector(".container").appendChild(el);}
   el.textContent=message;
 }
+function validUsername(value){return /^[a-z0-9_.-]{3,32}$/.test(value);}
+async function enterSharedSpace(){
+  const username=document.getElementById("sharedUsername").value.trim().toLowerCase();
+  if(!validUsername(username)){
+    showAuthMessage("Użyj 3–32 znaków: małych liter, cyfr, kropki, myślnika lub podkreślenia.");
+    return;
+  }
+  currentUsername=username;
+  showAuthMessage("Pobieranie wspólnych danych…");
+  document.getElementById("enterSharedButton").disabled=true;
+  await loadCloudSession();
+  authPanel.style.display="none";
+  appContent.style.display="block";
+  document.getElementById("loggedUsername").textContent=currentUsername;
+  showSyncStatus("Wspólny zestaw: "+currentUsername);
+  if(sharedChannel)sb.removeChannel(sharedChannel);
+  sharedChannel=sb.channel("shared-"+currentUsername)
+    .on("postgres_changes",{event:"*",schema:"public",table:"wyniki",filter:"nick=eq."+currentUsername},payload=>{
+      if(payload.new && (!saveTimer) && payload.new.id!==currentRowId){
+        loadCloudSession();
+      }else if(payload.new && payload.new.id===currentRowId && !saveTimer){
+        loadCloudSession();
+      }
+    }).subscribe();
+  document.getElementById("enterSharedButton").disabled=false;
+}
 function snapshot(){
   const start=getStartDate();
-  if(!start||!currentUser)return null;
+  if(!start||!currentUsername)return null;
   const now=Date.now();
   const taskNow=(taskStartedAt!==null&&!taskPaused)?Math.max(0,now-taskStartedAt):0;
   const elapsed=Math.max(0,now-start.getTime());
   const workingMs=Math.max(0,elapsed-taskElapsedTotal-taskNow);
   const hours=workingMs/3600000;
   return {
-    user_id:currentUser.id,nick:currentUsername,
+    user_id:null,nick:currentUsername,
     data_startu:startDate.value,godzina_startu:startTime.value,
     counter,czas_godzin:Number(hours.toFixed(4)),
     wynik_na_godzine:Number((hours>0?counter/hours:0).toFixed(4)),
@@ -490,24 +464,50 @@ function snapshot(){
   };
 }
 function scheduleCloudSave(){
-  if(!currentUser||isHydrating)return;
+  if(!currentUsername||isHydrating)return;
   clearTimeout(saveTimer);
-  saveTimer=setTimeout(saveCloudSession,2500);
+  saveTimer=setTimeout(()=>{saveTimer=null;saveCloudSession();},1200);
 }
 async function saveCloudSession(){
   const row=snapshot();if(!row)return;
-  showSyncStatus("Zapisywanie…");
-  const {error}=await sb.from("wyniki").upsert(row,{onConflict:"user_id,data_startu,godzina_startu"});
+  showSyncStatus("Zapisywanie wspólnych danych…");
+  let error=null;
+  if(currentRowId){
+    const result=await sb.from("wyniki").update(row).eq("id",currentRowId);
+    error=result.error;
+  }else{
+    const found=await sb.from("wyniki").select("id").ilike("nick",currentUsername)
+      .eq("data_startu",row.data_startu).eq("godzina_startu",row.godzina_startu)
+      .order("updated_at",{ascending:false}).limit(1);
+    if(found.error){showSyncStatus("Błąd odczytu: "+found.error.message);return;}
+    if(found.data&&found.data.length){
+      currentRowId=found.data[0].id;
+      const result=await sb.from("wyniki").update(row).eq("id",currentRowId);
+      error=result.error;
+    }else{
+      const result=await sb.from("wyniki").insert(row).select("id").single();
+      error=result.error;
+      if(!error)currentRowId=result.data.id;
+    }
+  }
   if(error){showSyncStatus("Błąd synchronizacji: "+error.message);return;}
-  showSyncStatus("Zapisano · "+new Date().toLocaleTimeString("pl-PL"));
+  showSyncStatus("Zapisano wspólne dane · "+new Date().toLocaleTimeString("pl-PL"));
 }
 async function loadCloudSession(){
   isHydrating=true;
-  const {data,error}=await sb.from("wyniki").select("*").eq("user_id",currentUser.id).order("created_at",{ascending:false}).limit(1);
-  if(error){isHydrating=false;showSyncStatus("Nie udało się pobrać danych: "+error.message);return;}
+  const {data,error}=await sb.from("wyniki").select("*").ilike("nick",currentUsername)
+    .order("updated_at",{ascending:false}).limit(1);
+  if(error){
+    isHydrating=false;
+    showAuthMessage("Nie udało się pobrać danych: "+error.message);
+    showSyncStatus("Błąd pobierania: "+error.message);
+    return;
+  }
   if(data&&data.length){
     const row=data[0];
-    startDate.value=row.data_startu;startTime.value=String(row.godzina_startu).slice(0,5);
+    currentRowId=row.id;
+    startDate.value=row.data_startu;
+    startTime.value=String(row.godzina_startu).slice(0,5);
     counter=Number(row.counter)||0;
     totalInterval=Number(row.total_interval_ms)||0;
     intervalCount=Number(row.interval_count)||0;
@@ -516,41 +516,42 @@ async function loadCloudSession(){
     offTaskEvents=Array.isArray(row.off_task_events)?row.off_task_events:[];
     openOffTaskId=(offTaskEvents.find(event=>!event.end)||{}).id||null;
     if(row.task_started_at&&row.task_ends_at&&new Date(row.task_ends_at).getTime()>Date.now()){
-      taskStartedAt=Date.now();
+      taskStartedAt=new Date(row.task_started_at).getTime();
       taskEndsAt=new Date(row.task_ends_at).getTime();
-      taskElapsedTotal+=Math.max(0,Date.now()-new Date(row.task_started_at).getTime());
       taskPaused=false;startTaskButton.disabled=true;finishTaskButton.disabled=false;
-    }else{taskStartedAt=null;taskEndsAt=null;taskPaused=false;startTaskButton.disabled=false;finishTaskButton.disabled=true;}
+    }else{
+      taskStartedAt=null;taskEndsAt=null;taskPaused=false;
+      startTaskButton.disabled=false;finishTaskButton.disabled=true;
+    }
     monitorStartedAt=lastPressTime||Date.now();
     hasRegisteredPress=lastPressTime!==null;
+    averageIntervalElement.textContent=intervalCount?formatInterval(totalInterval/intervalCount):"—";
     renderEvents();update();
+    showSyncStatus("Wczytano dane · "+new Date().toLocaleTimeString("pl-PL"));
+  }else{
+    currentRowId=null;
+    setDefaultDateTime();
+    counter=0;lastPressTime=null;totalInterval=0;intervalCount=0;
+    taskElapsedTotal=0;offTaskEvents=[];openOffTaskId=null;
+    monitorStartedAt=Date.now();hasRegisteredPress=false;restoredIdleState=false;
+    renderEvents();update();
+    showSyncStatus("Nowa nazwa — tworzę wspólny zestaw danych…");
   }
   isHydrating=false;
   if(!data||!data.length)await saveCloudSession();
 }
-document.getElementById("registerButton").addEventListener("click",registerAccount);
-document.getElementById("forgotPasswordButton").addEventListener("click",requestPasswordReset);
-document.getElementById("saveNewPasswordButton").addEventListener("click",saveNewPassword);
-document.getElementById("loginButton").addEventListener("click",loginAccount);
+document.getElementById("enterSharedButton").addEventListener("click",enterSharedSpace);
+document.getElementById("sharedUsername").addEventListener("keydown",event=>{
+  if(event.key==="Enter")enterSharedSpace();
+});
 document.getElementById("logoutButton").addEventListener("click",async()=>{
-  await saveCloudSession();
-  await sb.auth.signOut();currentUser=null;currentUsername="";
+  if(saveTimer){clearTimeout(saveTimer);saveTimer=null;await saveCloudSession();}
+  if(sharedChannel){await sb.removeChannel(sharedChannel);sharedChannel=null;}
+  currentUsername="";currentRowId=null;
   appContent.style.display="none";authPanel.style.display="block";
-  showAuthMessage("Wylogowano.");
+  document.getElementById("sharedUsername").value="";
+  showAuthMessage("Zamknięto wspólny zestaw danych.");
 });
-sb.auth.onAuthStateChange((event)=>{
-  if(event==="PASSWORD_RECOVERY"){
-    authPanel.style.display="block";appContent.style.display="none";
-    document.getElementById("resetPasswordPanel").hidden=false;
-    showAuthMessage("Ustaw nowe hasło do konta.");
-  }else if(event==="SIGNED_OUT"){
-    currentUser=null;currentUsername="";
-  }
-});
-sb.auth.getSession().then(({data})=>{
-  if(data.session?.user)afterLogin(data.session.user);
-});
-
 </script>
 </body>
 </html>
