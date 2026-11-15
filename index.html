@@ -467,7 +467,7 @@ function snapshot(){
 function scheduleCloudSave(){
   if(!currentUser||isHydrating)return;
   clearTimeout(saveTimer);
-  saveTimer=setTimeout(saveCloudSession,900);
+  saveTimer=setTimeout(saveCloudSession,2500);
 }
 async function saveCloudSession(){
   const row=snapshot();if(!row)return;
