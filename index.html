@@ -423,7 +423,8 @@ async function enterSharedSpace(){
   currentUsername=username;
   showAuthMessage("Pobieranie wspólnych danych…");
   document.getElementById("enterSharedButton").disabled=true;
-  await loadCloudSession();
+  const loaded=await loadCloudSession();
+  if(!loaded){document.getElementById("enterSharedButton").disabled=false;return;}
   authPanel.style.display="none";
   appContent.style.display="block";
   document.getElementById("loggedUsername").textContent=currentUsername;
@@ -501,7 +502,7 @@ async function loadCloudSession(){
     isHydrating=false;
     showAuthMessage("Nie udało się pobrać danych: "+error.message);
     showSyncStatus("Błąd pobierania: "+error.message);
-    return;
+    return false;
   }
   if(data&&data.length){
     const row=data[0];
@@ -539,6 +540,7 @@ async function loadCloudSession(){
   }
   isHydrating=false;
   if(!data||!data.length)await saveCloudSession();
+  return true;
 }
 document.getElementById("enterSharedButton").addEventListener("click",enterSharedSpace);
 document.getElementById("sharedUsername").addEventListener("keydown",event=>{
