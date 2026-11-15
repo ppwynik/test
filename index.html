@@ -45,6 +45,18 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
 .auth-actions button.secondary{background:#374151}.auth-message{min-height:24px;margin-top:12px;color:#fbbf24;font-size:14px}.account-bar{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;color:#cbd5e1;font-size:14px}.account-bar button{background:#374151;min-width:auto;padding:9px 14px;font-size:14px}
 #appContent{display:none}.sync-state{font-size:12px;color:#9ca3af;text-align:right;margin-top:8px}
 
+.page-nav{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:0 0 22px}
+.page-nav button{background:#374151;min-width:130px;font-size:15px;padding:11px 16px}
+.page-nav button.active{background:#2563eb}
+.history-panel{display:none}
+.history-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:16px 0}
+.history-controls>div{flex:1;min-width:180px}
+.history-controls button{background:#2563eb;font-size:15px;min-width:130px;padding:12px 16px}
+.history-summary{background:#111827;padding:14px;border-radius:12px;color:#cbd5e1;margin:14px 0}
+.history-table{min-width:620px}
+.history-table td:not(:first-child),.history-table th:not(:first-child){text-align:right}
+.history-empty{padding:24px;text-align:center;color:#9ca3af}
+@media(max-width:500px){.history-controls{align-items:stretch}.history-controls>div{min-width:100%}.page-nav button{flex:1;min-width:0}}
 </style>
 </head>
 <body>
@@ -65,6 +77,11 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
 
 <div class="container">
   <h1>Praca</h1>
+  <nav class="page-nav" aria-label="Nawigacja aplikacji">
+    <button type="button" id="livePageButton" class="active">Licznik</button>
+    <button type="button" id="historyPageButton">Historia dni</button>
+  </nav>
+  <div id="livePage">
   <div class="inputs">
     <div><label for="startDate">Data</label><input type="date" id="startDate"></div>
     <div><label for="startTime">Godzina</label><input type="time" id="startTime"></div>
@@ -110,6 +127,22 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
     <div class="table-actions">
       <button id="exportButton">Eksportuj CSV</button>
       <button class="clear-history" id="clearHistoryButton">Usuń historię</button>
+    </div>
+  </section>
+  </div>
+  <section class="history-panel" id="historyPage">
+    <h2>Historia pracy</h2>
+    <p style="color:#9ca3af;text-align:center">Wybierz dzień, aby rozwinąć zapisane sesje i zobaczyć czas pracy, licznik oraz wynik.</p>
+    <div class="history-controls">
+      <div><label for="historyDaySelect">Wybierz dzień</label><select id="historyDaySelect" style="width:100%;padding:12px;border:1px solid #374151;border-radius:10px;background:#111827;color:white;font-size:16px"><option value="">Ładowanie dni…</option></select></div>
+      <button type="button" id="refreshHistoryButton">Odśwież</button>
+    </div>
+    <div id="historySummary" class="history-summary" aria-live="polite">Wybierz dzień z listy.</div>
+    <div class="table-wrap">
+      <table class="history-table">
+        <thead><tr><th>Godzina rozpoczęcia</th><th>Czas pracy</th><th>Licznik</th><th>Wynik / h</th></tr></thead>
+        <tbody id="historyTableBody"><tr><td colspan="4" class="history-empty">Brak wybranego dnia.</td></tr></tbody>
+      </table>
     </div>
   </section>
 </div>
@@ -407,6 +440,99 @@ let currentRowId=null;
 let saveTimer=null;
 let isHydrating=false;
 let sharedChannel=null;
+let historyRows=[];
+let historyLoaded=false;
+const livePage=document.getElementById("livePage");
+const historyPage=document.getElementById("historyPage");
+const livePageButton=document.getElementById("livePageButton");
+const historyPageButton=document.getElementById("historyPageButton");
+const historyDaySelect=document.getElementById("historyDaySelect");
+const historyTableBody=document.getElementById("historyTableBody");
+const historySummary=document.getElementById("historySummary");
+function showPage(page){
+  const isHistory=page==="history";
+  livePage.style.display=isHistory?"none":"block";
+  historyPage.style.display=isHistory?"block":"none";
+  livePageButton.classList.toggle("active",!isHistory);
+  historyPageButton.classList.toggle("active",isHistory);
+  if(isHistory)loadHistory();
+}
+livePageButton.addEventListener("click",()=>showPage("live"));
+historyPageButton.addEventListener("click",()=>showPage("history"));
+document.getElementById("refreshHistoryButton").addEventListener("click",loadHistory);
+historyDaySelect.addEventListener("change",renderSelectedHistoryDay);
+function formatHours(value){
+  const hours=Math.max(0,Number(value)||0);
+  const totalMinutes=Math.round(hours*60);
+  const h=Math.floor(totalMinutes/60),m=totalMinutes%60;
+  return h+" godz. "+String(m).padStart(2,"0")+" min";
+}
+function formatHistoryDate(value){
+  const parts=String(value).split("-");
+  if(parts.length!==3)return value;
+  return parts[2]+"."+parts[1]+"."+parts[0];
+}
+async function loadHistory(){
+  if(!currentUsername)return;
+  historySummary.textContent="Pobieranie historii…";
+  historyTableBody.innerHTML='<tr><td colspan="4" class="history-empty">Ładowanie…</td></tr>';
+  const {data,error}=await sb.from("wyniki")
+    .select("id,data_startu,godzina_startu,czas_godzin,counter,wynik_na_godzine,updated_at")
+    .ilike("nick",currentUsername)
+    .order("data_startu",{ascending:false})
+    .order("godzina_startu",{ascending:false})
+    .limit(1000);
+  if(error){
+    historySummary.textContent="Nie udało się pobrać historii: "+error.message;
+    historyTableBody.innerHTML='<tr><td colspan="4" class="history-empty">Błąd pobierania danych.</td></tr>';
+    return;
+  }
+  historyRows=data||[];
+  historyLoaded=true;
+  const days=[...new Set(historyRows.map(row=>row.data_startu))];
+  const previousDay=historyDaySelect.value;
+  historyDaySelect.innerHTML="";
+  if(!days.length){
+    historyDaySelect.innerHTML='<option value="">Brak zapisanych dni</option>';
+    historySummary.textContent="Nie ma jeszcze zapisanych sesji.";
+    historyTableBody.innerHTML='<tr><td colspan="4" class="history-empty">Historia pojawi się tutaj po zapisaniu pierwszej sesji.</td></tr>';
+    return;
+  }
+  days.forEach(day=>{
+    const option=document.createElement("option");
+    option.value=day;
+    option.textContent=formatHistoryDate(day);
+    historyDaySelect.appendChild(option);
+  });
+  historyDaySelect.value=days.includes(previousDay)?previousDay:days[0];
+  renderSelectedHistoryDay();
+}
+function renderSelectedHistoryDay(){
+  const day=historyDaySelect.value;
+  const rows=historyRows.filter(row=>row.data_startu===day)
+    .sort((a,b)=>String(b.godzina_startu).localeCompare(String(a.godzina_startu)));
+  historyTableBody.innerHTML="";
+  if(!rows.length){
+    historySummary.textContent="Brak zapisów dla wybranego dnia.";
+    historyTableBody.innerHTML='<tr><td colspan="4" class="history-empty">Brak sesji tego dnia.</td></tr>';
+    return;
+  }
+  const totalCounter=rows.reduce((sum,row)=>sum+(Number(row.counter)||0),0);
+  const totalHours=rows.reduce((sum,row)=>sum+(Number(row.czas_godzin)||0),0);
+  historySummary.textContent="Dzień "+formatHistoryDate(day)+" · "+rows.length+" sesji · łącznie "+formatHours(totalHours)+" · suma licznika "+totalCounter;
+  rows.forEach(row=>{
+    const tr=document.createElement("tr");
+    const time=String(row.godzina_startu||"").slice(0,5);
+    const values=[time,formatHours(row.czas_godzin),String(Number(row.counter)||0),(Number(row.wynik_na_godzine)||0).toFixed(2).replace(".",",")];
+    values.forEach(value=>{
+      const td=document.createElement("td");
+      td.textContent=value;
+      tr.appendChild(td);
+    });
+    historyTableBody.appendChild(tr);
+  });
+}
+
 function showAuthMessage(message){authMessage.textContent=message;}
 function showSyncStatus(message){
   let el=document.getElementById("syncStatus");
@@ -432,6 +558,7 @@ async function enterSharedSpace(){
   if(sharedChannel)sb.removeChannel(sharedChannel);
   sharedChannel=sb.channel("shared-"+currentUsername)
     .on("postgres_changes",{event:"*",schema:"public",table:"wyniki",filter:"nick=eq."+currentUsername},payload=>{
+      if(historyPage.style.display==="block")loadHistory();
       if(payload.new && (!saveTimer) && payload.new.id!==currentRowId){
         loadCloudSession();
       }else if(payload.new && payload.new.id===currentRowId && !saveTimer){
