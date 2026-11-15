@@ -437,6 +437,7 @@ const appContent=document.getElementById("appContent");
 const authMessage=document.getElementById("authMessage");
 let currentUsername="";
 let currentRowId=null;
+let currentRowKey="";
 let saveTimer=null;
 let isHydrating=false;
 let sharedChannel=null;
@@ -519,7 +520,7 @@ function renderSelectedHistoryDay(){
   }
   const totalCounter=rows.reduce((sum,row)=>sum+(Number(row.counter)||0),0);
   const totalHours=rows.reduce((sum,row)=>sum+(Number(row.czas_godzin)||0),0);
-  historySummary.textContent="Dzień "+formatHistoryDate(day)+" · "+rows.length+" sesji · łącznie "+formatHours(totalHours)+" · suma licznika "+totalCounter;
+  historySummary.textContent="Dzień "+formatHistoryDate(day)+" · "+rows.length+" sesji · łącznie "+formatHours(totalHours)+" · suma licznika "+totalCounter+" · średni wynik "+(totalHours>0?(totalCounter/totalHours).toFixed(2).replace(".",","):"0,00")+"/h";
   rows.forEach(row=>{
     const tr=document.createElement("tr");
     const time=String(row.godzina_startu||"").slice(0,5);
@@ -598,9 +599,10 @@ function scheduleCloudSave(){
 }
 async function saveCloudSession(){
   const row=snapshot();if(!row)return;
+  const rowKey=row.data_startu+"|"+row.godzina_startu;
   showSyncStatus("Zapisywanie wspólnych danych…");
   let error=null;
-  if(currentRowId){
+  if(currentRowId && currentRowKey===rowKey){
     const result=await sb.from("wyniki").update(row).eq("id",currentRowId);
     error=result.error;
   }else{
@@ -610,12 +612,13 @@ async function saveCloudSession(){
     if(found.error){showSyncStatus("Błąd odczytu: "+found.error.message);return;}
     if(found.data&&found.data.length){
       currentRowId=found.data[0].id;
+      currentRowKey=rowKey;
       const result=await sb.from("wyniki").update(row).eq("id",currentRowId);
       error=result.error;
     }else{
       const result=await sb.from("wyniki").insert(row).select("id").single();
       error=result.error;
-      if(!error)currentRowId=result.data.id;
+      if(!error){currentRowId=result.data.id;currentRowKey=rowKey;}
     }
   }
   if(error){showSyncStatus("Błąd synchronizacji: "+error.message);return;}
@@ -634,6 +637,7 @@ async function loadCloudSession(){
   if(data&&data.length){
     const row=data[0];
     currentRowId=row.id;
+    currentRowKey=row.data_startu+"|"+row.godzina_startu;
     startDate.value=row.data_startu;
     startTime.value=String(row.godzina_startu).slice(0,5);
     counter=Number(row.counter)||0;
@@ -657,7 +661,7 @@ async function loadCloudSession(){
     renderEvents();update();
     showSyncStatus("Wczytano dane · "+new Date().toLocaleTimeString("pl-PL"));
   }else{
-    currentRowId=null;
+    currentRowId=null;currentRowKey="";
     setDefaultDateTime();
     counter=0;lastPressTime=null;totalInterval=0;intervalCount=0;
     taskElapsedTotal=0;offTaskEvents=[];openOffTaskId=null;
@@ -676,7 +680,7 @@ document.getElementById("sharedUsername").addEventListener("keydown",event=>{
 document.getElementById("logoutButton").addEventListener("click",async()=>{
   if(saveTimer){clearTimeout(saveTimer);saveTimer=null;await saveCloudSession();}
   if(sharedChannel){await sb.removeChannel(sharedChannel);sharedChannel=null;}
-  currentUsername="";currentRowId=null;
+  currentUsername="";currentRowId=null;currentRowKey="";
   appContent.style.display="none";authPanel.style.display="block";
   document.getElementById("sharedUsername").value="";
   showAuthMessage("Zamknięto wspólny zestaw danych.");
