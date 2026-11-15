@@ -209,11 +209,8 @@ function shiftStartFor(date){
 function getCurrentShiftStart(now=new Date()){
   const minutes=now.getHours()*60+now.getMinutes();
   if(minutes>=SHIFT_START_MINUTES)return shiftStartFor(now);
-  if(minutes<SHIFT_END_MINUTES){
-    const yesterday=new Date(now);yesterday.setDate(yesterday.getDate()-1);
-    return shiftStartFor(yesterday);
-  }
-  return shiftStartFor(new Date(now.getFullYear(),now.getMonth(),now.getDate()));
+  const previousDay=new Date(now);previousDay.setDate(previousDay.getDate()-1);
+  return shiftStartFor(previousDay);
 }
 function getShiftEnd(start){
   const end=new Date(start);
