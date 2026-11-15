@@ -538,13 +538,11 @@ document.getElementById("logoutButton").addEventListener("click",async()=>{
   appContent.style.display="none";authPanel.style.display="block";
   showAuthMessage("Wylogowano.");
 });
-sb.auth.onAuthStateChange((event,session)=>{
+sb.auth.onAuthStateChange((event)=>{
   if(event==="PASSWORD_RECOVERY"){
     authPanel.style.display="block";appContent.style.display="none";
     document.getElementById("resetPasswordPanel").hidden=false;
     showAuthMessage("Ustaw nowe hasło do konta.");
-  }else if(event==="SIGNED_IN"&&session?.user){
-    afterLogin(session.user);
   }else if(event==="SIGNED_OUT"){
     currentUser=null;currentUsername="";
   }
