@@ -51,16 +51,22 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
 
 <section class="auth-panel" id="authPanel">
   <h1>Praca — konto</h1>
-  <p>Utwórz konto lub zaloguj się nazwą użytkownika i hasłem. Twoje wyniki będą synchronizowane z bazą i dostępne na innych urządzeniach.</p>
-  <label for="authUsername">Nazwa użytkownika</label>
-  <input id="authUsername" autocomplete="username" maxlength="30" placeholder="np. jan_kowalski">
+  <p>Zarejestruj się lub zaloguj adresem e-mail i hasłem. Wyniki będą synchronizowane między Twoimi urządzeniami.</p>
+  <label for="authEmail">Adres e-mail</label>
+  <input id="authEmail" type="email" autocomplete="email" maxlength="254" placeholder="np. jan@example.com" required>
   <label for="authPassword">Hasło (minimum 8 znaków)</label>
   <input id="authPassword" type="password" autocomplete="current-password" minlength="8" placeholder="Hasło">
   <div class="auth-actions">
     <button id="registerButton" type="button">Utwórz konto</button>
     <button id="loginButton" class="secondary" type="button">Zaloguj</button>
   </div>
-  <div class="auth-message" id="authMessage" role="status"></div>
+  <div class="auth-actions"><button id="forgotPasswordButton" class="secondary" type="button">Nie pamiętam hasła</button></div>
+  <div class="auth-message" id="authMessage" role="status" aria-live="polite"></div>
+  <div id="resetPasswordPanel" hidden>
+    <label for="newPassword">Nowe hasło</label>
+    <input id="newPassword" type="password" autocomplete="new-password" minlength="8" placeholder="Nowe hasło">
+    <div class="auth-actions"><button id="saveNewPasswordButton" type="button">Zapisz nowe hasło</button></div>
+  </div>
 </section>
 <div id="appContent">
   <div class="account-bar"><span>Zalogowano jako <strong id="loggedUsername"></strong></span><button id="logoutButton" type="button">Wyloguj</button></div>
@@ -403,35 +409,53 @@ let currentUser=null;
 let currentUsername="";
 let saveTimer=null;
 let isHydrating=false;
-function usernameToEmail(name){return name.toLowerCase()+"@users.praca.local";}
-function cleanUsername(value){return value.trim().toLowerCase();}
-function validUsername(value){return /^[a-z0-9_]{3,30}$/.test(value);}
+function emailValue(){return document.getElementById("authEmail").value.trim().toLowerCase();}
+function validEmail(value){return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value);}
 function showAuthMessage(message){authMessage.textContent=message;}
+function authRedirectUrl(){return window.location.origin+window.location.pathname;}
 async function registerAccount(){
-  const username=cleanUsername(document.getElementById("authUsername").value);
+  const email=emailValue();
   const password=document.getElementById("authPassword").value;
-  if(!validUsername(username)){showAuthMessage("Nazwa: 3–30 znaków, tylko litery a-z, cyfry i podkreślenie.");return;}
+  if(!validEmail(email)){showAuthMessage("Wpisz poprawny adres e-mail.");return;}
   if(password.length<8){showAuthMessage("Hasło musi mieć co najmniej 8 znaków.");return;}
   showAuthMessage("Tworzenie konta…");
-  const {data,error}=await sb.auth.signUp({email:usernameToEmail(username),password,options:{data:{username}}});
+  const {data,error}=await sb.auth.signUp({email,password,options:{emailRedirectTo:authRedirectUrl(),data:{username:email}}});
   if(error){showAuthMessage(error.message);return;}
-  if(!data.session){showAuthMessage("Konto utworzone. W projekcie Supabase wyłącz potwierdzanie e-maili (Authentication → Providers → Email → Confirm email), ponieważ logowanie używa nazwy użytkownika.");return;}
-  await afterLogin(data.user,username);
+  if(!data.session){showAuthMessage("Konto utworzone. Wysłaliśmy wiadomość z linkiem aktywacyjnym. Kliknij link w e-mailu, a następnie wróć do aplikacji.");return;}
+  await afterLogin(data.user);
 }
 async function loginAccount(){
-  const username=cleanUsername(document.getElementById("authUsername").value);
+  const email=emailValue();
   const password=document.getElementById("authPassword").value;
-  if(!validUsername(username)||!password){showAuthMessage("Wpisz poprawną nazwę użytkownika i hasło.");return;}
+  if(!validEmail(email)||!password){showAuthMessage("Wpisz poprawny e-mail i hasło.");return;}
   showAuthMessage("Logowanie…");
-  const {data,error}=await sb.auth.signInWithPassword({email:usernameToEmail(username),password});
-  if(error){showAuthMessage("Nie udało się zalogować. Sprawdź nazwę i hasło.");return;}
-  await afterLogin(data.user,username);
+  const {data,error}=await sb.auth.signInWithPassword({email,password});
+  if(error){showAuthMessage("Nie udało się zalogować. Sprawdź e-mail, hasło i czy konto zostało aktywowane.");return;}
+  await afterLogin(data.user);
 }
-async function afterLogin(user,username){
-  currentUser=user;currentUsername=username;
-  const {error:profileError}=await sb.from("profiles").upsert({id:user.id,username},{onConflict:"id"});
+async function requestPasswordReset(){
+  const email=emailValue();
+  if(!validEmail(email)){showAuthMessage("Najpierw wpisz adres e-mail, na który mamy wysłać link.");return;}
+  showAuthMessage("Wysyłanie wiadomości…");
+  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:authRedirectUrl()});
+  if(error){showAuthMessage(error.message);return;}
+  showAuthMessage("Jeśli konto istnieje, wysłaliśmy wiadomość z linkiem do ustawienia nowego hasła.");
+}
+async function saveNewPassword(){
+  const password=document.getElementById("newPassword").value;
+  if(password.length<8){showAuthMessage("Nowe hasło musi mieć co najmniej 8 znaków.");return;}
+  const {error}=await sb.auth.updateUser({password});
+  if(error){showAuthMessage("Nie udało się zmienić hasła: "+error.message);return;}
+  document.getElementById("resetPasswordPanel").hidden=true;
+  showAuthMessage("Hasło zostało zmienione. Możesz korzystać z aplikacji.");
+  const {data}=await sb.auth.getUser();
+  if(data.user)await afterLogin(data.user);
+}
+async function afterLogin(user){
+  currentUser=user;currentUsername=user.email||"konto";
+  const {error:profileError}=await sb.from("profiles").upsert({id:user.id,username:currentUsername},{onConflict:"id"});
   if(profileError){showAuthMessage("Błąd profilu: "+profileError.message);return;}
-  document.getElementById("loggedUsername").textContent=username;
+  document.getElementById("loggedUsername").textContent=currentUsername;
   authPanel.style.display="none";appContent.style.display="block";
   await loadCloudSession();
   showSyncStatus("Synchronizacja aktywna");
@@ -505,6 +529,8 @@ async function loadCloudSession(){
   if(!data||!data.length)await saveCloudSession();
 }
 document.getElementById("registerButton").addEventListener("click",registerAccount);
+document.getElementById("forgotPasswordButton").addEventListener("click",requestPasswordReset);
+document.getElementById("saveNewPasswordButton").addEventListener("click",saveNewPassword);
 document.getElementById("loginButton").addEventListener("click",loginAccount);
 document.getElementById("logoutButton").addEventListener("click",async()=>{
   await saveCloudSession();
@@ -512,12 +538,19 @@ document.getElementById("logoutButton").addEventListener("click",async()=>{
   appContent.style.display="none";authPanel.style.display="block";
   showAuthMessage("Wylogowano.");
 });
-sb.auth.getSession().then(({data})=>{
-  if(data.session){
-    const user=data.session.user;
-    const username=user.user_metadata?.username||user.email?.split("@")[0]||"użytkownik";
-    afterLogin(user,username);
+sb.auth.onAuthStateChange((event,session)=>{
+  if(event==="PASSWORD_RECOVERY"){
+    authPanel.style.display="block";appContent.style.display="none";
+    document.getElementById("resetPasswordPanel").hidden=false;
+    showAuthMessage("Ustaw nowe hasło do konta.");
+  }else if(event==="SIGNED_IN"&&session?.user){
+    afterLogin(session.user);
+  }else if(event==="SIGNED_OUT"){
+    currentUser=null;currentUsername="";
   }
+});
+sb.auth.getSession().then(({data})=>{
+  if(data.session?.user)afterLogin(data.session.user);
 });
 
 </script>
