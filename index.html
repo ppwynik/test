@@ -456,7 +456,10 @@ function showPage(page){
   historyPage.style.display=isHistory?"block":"none";
   livePageButton.classList.toggle("active",!isHistory);
   historyPageButton.classList.toggle("active",isHistory);
-  if(isHistory)loadHistory();
+  if(isHistory){
+    if(saveTimer){clearTimeout(saveTimer);saveTimer=null;saveCloudSession().then(loadHistory);}
+    else loadHistory();
+  }
 }
 livePageButton.addEventListener("click",()=>showPage("live"));
 historyPageButton.addEventListener("click",()=>showPage("history"));
