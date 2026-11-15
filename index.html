@@ -64,9 +64,9 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
 <section class="auth-panel" id="authPanel">
   <h1>Wskaźnik wydajności pracy</h1>
   <label for="sharedUsername">Nazwa użytkownika (3–32 znaki)</label>
-  <input id="sharedUsername" type="text" autocomplete="username" maxlength="32" placeholder="np. jan_kowalski" required>
+  <input id="sharedUsername" type="text" autocomplete="username" maxlength="32" placeholder="np. jarek_ogarek" required>
   <div class="auth-actions">
-    <button id="enterSharedButton" type="button">Otwórz dane</button>
+    <button id="enterSharedButton" type="button">Zaloguj</button>
   </div>
   <div class="auth-message" id="authMessage" role="status" aria-live="polite"></div>
 </section>
@@ -92,14 +92,14 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
   <div class="counter" id="counter">0</div>
   <div class="result" id="result">0,00 / h</div>
   <div class="last-interval" id="lastInterval">—</div>
-  <div class="last-label">Czas od ostatniego naciśnięcia</div>
+  <div class="last-label">Czas procesowanej paczki</div>
   <div class="average">Średnia <strong id="averageInterval">—</strong></div>
   <div class="buttons">
     <button class="minus" id="minusButton">−1</button>
     <button class="plus" id="plusButton">+1</button>
   </div>
   <div class="reset"><button id="resetButton">Reset licznika</button></div>
-  <div class="hint">Naciśnij SPACJĘ lub +1. Po 3 minutach bez naciśnięcia zapisze się OFF-TASK. Naciśnij T, aby rozpocząć TASK.</div>
+  <div class="hint">SPACJA=+1 T=task</div>
 
 
 
