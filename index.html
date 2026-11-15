@@ -198,16 +198,64 @@ function saveEvents(){
   catch(e){offTaskStatus.textContent="Nie udało się zapisać historii w pamięci przeglądarki."}
   scheduleCloudSave();
 }
+const SHIFT_START_MINUTES=18*60+30;
+const SHIFT_END_MINUTES=5*60;
+function dateKey(date){
+  return date.getFullYear()+"-"+String(date.getMonth()+1).padStart(2,"0")+"-"+String(date.getDate()).padStart(2,"0");
+}
+function shiftStartFor(date){
+  return new Date(date.getFullYear(),date.getMonth(),date.getDate(),18,30,0,0);
+}
+function getCurrentShiftStart(now=new Date()){
+  const minutes=now.getHours()*60+now.getMinutes();
+  if(minutes>=SHIFT_START_MINUTES)return shiftStartFor(now);
+  if(minutes<SHIFT_END_MINUTES){
+    const yesterday=new Date(now);yesterday.setDate(yesterday.getDate()-1);
+    return shiftStartFor(yesterday);
+  }
+  return shiftStartFor(new Date(now.getFullYear(),now.getMonth(),now.getDate()));
+}
+function getShiftEnd(start){
+  const end=new Date(start);
+  end.setDate(end.getDate()+1);
+  end.setHours(5,0,0,0);
+  return end;
+}
+function isInsideShift(now=new Date()){
+  const start=getCurrentShiftStart(now);
+  return now>=start && now<getShiftEnd(start);
+}
 function setDefaultDateTime(){
-  const now=new Date();
-  startDate.value=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
-  startTime.value="07:00";
+  const start=getCurrentShiftStart();
+  startDate.value=dateKey(start);
+  startTime.value="18:30";
 }
 function getStartDate(){
-  if(!startDate.value||!startTime.value)return null;
+  if(!startDate.value)return null;
   const [year,month,day]=startDate.value.split("-").map(Number);
-  const [hours,minutes]=startTime.value.split(":").map(Number);
-  return new Date(year,month-1,day,hours,minutes,0);
+  return new Date(year,month-1,day,18,30,0,0);
+}
+function rolloverShiftIfNeeded(){
+  const expected=getCurrentShiftStart();
+  const current=getStartDate();
+  if(!current || dateKey(current)===dateKey(expected))return;
+  if(currentRowId && currentRowKey){
+    if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
+    saveCloudSession().then(()=>{
+      startDate.value=dateKey(expected);startTime.value="18:30";
+      counter=0;lastPressTime=null;totalInterval=0;intervalCount=0;taskElapsedTotal=0;
+      offTaskEvents=[];openOffTaskId=null;
+      taskStartedAt=null;taskEndsAt=null;taskPaused=false;
+      hasRegisteredPress=false;monitorStartedAt=Date.now();restoredIdleState=false;
+      averageIntervalElement.textContent="—";lastIntervalElement.textContent="—";
+      renderEvents();update();scheduleCloudSave();
+    });
+  }else{
+    startDate.value=dateKey(expected);startTime.value="18:30";
+    counter=0;lastPressTime=null;totalInterval=0;intervalCount=0;taskElapsedTotal=0;
+    hasRegisteredPress=false;monitorStartedAt=Date.now();restoredIdleState=false;
+    update();scheduleCloudSave();
+  }
 }
 function formatInterval(ms){
   const seconds=Math.max(0,Math.floor(ms/1000));
@@ -271,8 +319,9 @@ function update(){
   resultElement.classList.toggle("task-active", taskStartedAt!==null);
   const start=getStartDate();
   if(start){
-    let elapsedMs=Math.max(0,Date.now()-start.getTime());
-    const taskNow=(taskStartedAt!==null && !taskPaused) ? Math.max(0,Date.now()-taskStartedAt) : 0;
+    const shiftEnd=getShiftEnd(start);
+    const elapsedMs=Math.max(0,Math.min(Date.now(),shiftEnd)-start.getTime());
+    const taskNow=(taskStartedAt!==null && !taskPaused) ? Math.max(0,Math.min(Date.now(),shiftEnd)-taskStartedAt) : 0;
     const workingMs=Math.max(0,elapsedMs-taskElapsedTotal-taskNow);
     const hours=workingMs/3600000;
     const result=hours>0?counter/hours:0;
@@ -316,12 +365,14 @@ function registerActivity(){
   monitorStartedAt=now;
 }
 function addOne(){
+  if(!isInsideShift()){offTaskStatus.textContent="Licznik działa tylko w godzinach 18:30–05:00.";return;}
   registerActivity();
   counter++;
   update();
   scheduleCloudSave();
 }
 function removeOne(){
+  if(!isInsideShift()){offTaskStatus.textContent="Licznik działa tylko w godzinach 18:30–05:00.";return;}
   registerActivity();
   if(counter>0)counter--;
   update();
@@ -427,7 +478,7 @@ function updateTaskDisplay(){
 setDefaultDateTime();
 renderEvents();
 update();
-setInterval(function(){updateTaskDisplay();update();},1000);
+setInterval(function(){rolloverShiftIfNeeded();updateTaskDisplay();update();},1000);
 
 const SUPABASE_URL="https://xjhnomiaskiyygebjfmh.supabase.co";
 const SUPABASE_KEY="sb_publishable__FgbdkFbxsq_KtNYUoAc0Q_7_wM9sGR";
@@ -576,7 +627,7 @@ function snapshot(){
   if(!start||!currentUsername)return null;
   const now=Date.now();
   const taskNow=(taskStartedAt!==null&&!taskPaused)?Math.max(0,now-taskStartedAt):0;
-  const elapsed=Math.max(0,now-start.getTime());
+  const elapsed=Math.max(0,Math.min(now,getShiftEnd(start))-start.getTime());
   const workingMs=Math.max(0,elapsed-taskElapsedTotal-taskNow);
   const hours=workingMs/3600000;
   return {
@@ -642,7 +693,7 @@ async function loadCloudSession(){
     currentRowId=row.id;
     currentRowKey=row.data_startu+"|"+row.godzina_startu;
     startDate.value=row.data_startu;
-    startTime.value=String(row.godzina_startu).slice(0,5);
+    startTime.value="18:30";
     counter=Number(row.counter)||0;
     totalInterval=Number(row.total_interval_ms)||0;
     intervalCount=Number(row.interval_count)||0;
