@@ -108,11 +108,9 @@ th{color:#9ca3af;font-weight:600}td{color:#f3f4f6}
   <section class="task-panel" aria-label="Tryb TASK">
     <h2>Tryb TASK</h2>
     <div class="task-controls">
-      <div><label for="taskMinutes">Czas tasku (minuty)</label><input type="number" id="taskMinutes" min="1" max="480" value="15"></div>
-      <button id="startTaskButton" type="button">Start TASK</button>
-      <button id="finishTaskButton" type="button" disabled>Zakończ TASK</button>
+      <button id="toggleTaskButton" type="button">Rozpocznij TASK (T)</button>
     </div>
-    <div class="task-status" id="taskStatus" role="status">Ustaw czas i kliknij „Start TASK”.</div>
+    <div class="task-status" id="taskStatus" role="status">Naciśnij T, aby rozpocząć TASK.</div>
   </section>
 
   <section class="offtask-panel">
@@ -163,9 +161,7 @@ const minusButton=document.getElementById("minusButton");
 const resetButton=document.getElementById("resetButton");
 const offTaskStatus=document.getElementById("offTaskStatus");
 const offTaskTable=document.getElementById("offTaskTable");
-const taskMinutesInput=document.getElementById("taskMinutes");
-const startTaskButton=document.getElementById("startTaskButton");
-const finishTaskButton=document.getElementById("finishTaskButton");
+const toggleTaskButton=document.getElementById("toggleTaskButton");
 const taskStatus=document.getElementById("taskStatus");
 
 const IDLE_LIMIT=3*60*1000;
@@ -380,7 +376,7 @@ document.addEventListener("keydown",function(event){
   if(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement)return;
   if((event.key==="t"||event.key==="T")&&!event.repeat){
     event.preventDefault();
-    if(taskStartedAt===null)startTaskButton.click();
+    toggleTask();
     return;
   }
   if(event.code==="Space"&&!event.repeat){
@@ -432,45 +428,40 @@ document.getElementById("exportButton").addEventListener("click",function(){
   a.href=url;a.download="historia-off-task.csv";a.click();
   URL.revokeObjectURL(url);
 });
-function finishTask(manual=false){
+function finishTask(){
   if(taskStartedAt===null)return;
   const now=Date.now();
   taskElapsedTotal+=Math.max(0,now-taskStartedAt);
   taskStartedAt=null;
   taskEndsAt=null;
   taskPaused=false;
-  startTaskButton.disabled=false;
-  finishTaskButton.disabled=true;
-  taskStatus.textContent=manual ? "TASK zakończony ręcznie. Wynik został wznowiony." : "Czas TASK minął. Wynik został wznowiony.";
+  toggleTaskButton.textContent="Rozpocznij TASK (T)";
+  taskStatus.textContent="TASK zakończony. Wynik został wznowiony.";
   update();
   scheduleCloudSave();
 }
-startTaskButton.addEventListener("click",function(){
-  if(taskStartedAt!==null)return;
-  const minutes=Math.floor(Number(taskMinutesInput.value));
-  if(!Number.isFinite(minutes)||minutes<1||minutes>480){
-    taskStatus.textContent="Wpisz czas od 1 do 480 minut.";
+function toggleTask(){
+  if(taskStartedAt!==null){
+    finishTask();
+    return;
+  }
+  if(!isInsideShift()){
+    taskStatus.textContent="TASK można uruchomić w godzinach zmiany 18:30–05:00.";
     return;
   }
   if(getOpenEvent())endOffTask(Date.now());
   taskStartedAt=Date.now();
-  taskEndsAt=taskStartedAt+minutes*60000;
+  taskEndsAt=null;
   taskPaused=false;
-  startTaskButton.disabled=true;
-  finishTaskButton.disabled=false;
-  taskStatus.textContent="TASK trwa: "+minutes+" min. Wynik jest wstrzymany.";
+  toggleTaskButton.textContent="Zakończ TASK (T)";
+  taskStatus.textContent="TASK trwa: 0 s. Wynik jest wstrzymany.";
   update();
   scheduleCloudSave();
-});
-finishTaskButton.addEventListener("click",()=>finishTask(true));
+}
+toggleTaskButton.addEventListener("click",toggleTask);
 function updateTaskDisplay(){
   if(taskStartedAt===null)return;
-  const remaining=Math.max(0,taskEndsAt-Date.now());
-  const totalSeconds=Math.ceil(remaining/1000);
-  const mins=Math.floor(totalSeconds/60);
-  const secs=totalSeconds%60;
-  taskStatus.textContent="TASK trwa — pozostało "+mins+":"+String(secs).padStart(2,"0")+". Wynik jest wstrzymany.";
-  if(remaining<=0)finishTask(false);
+  taskStatus.textContent="TASK trwa: "+formatInterval(Date.now()-taskStartedAt)+". Naciśnij T, aby zakończyć. Wynik jest wstrzymany.";
 }
 setDefaultDateTime();
 renderEvents();
@@ -638,7 +629,7 @@ function snapshot(){
     total_interval_ms:totalInterval,interval_count:intervalCount,
     task_elapsed_ms:taskElapsedTotal,
     task_started_at:taskStartedAt?new Date(taskStartedAt).toISOString():null,
-    task_ends_at:taskEndsAt?new Date(taskEndsAt).toISOString():null,
+    task_ends_at:null,
     off_task_events:offTaskEvents,
     updated_at:new Date().toISOString()
   };
@@ -698,13 +689,14 @@ async function loadCloudSession(){
     lastPressTime=row.last_press_at?new Date(row.last_press_at).getTime():null;
     offTaskEvents=Array.isArray(row.off_task_events)?row.off_task_events:[];
     openOffTaskId=(offTaskEvents.find(event=>!event.end)||{}).id||null;
-    if(row.task_started_at&&row.task_ends_at&&new Date(row.task_ends_at).getTime()>Date.now()){
+    if(row.task_started_at){
       taskStartedAt=new Date(row.task_started_at).getTime();
-      taskEndsAt=new Date(row.task_ends_at).getTime();
-      taskPaused=false;startTaskButton.disabled=true;finishTaskButton.disabled=false;
+      taskEndsAt=null;
+      taskPaused=false;
+      toggleTaskButton.textContent="Zakończ TASK (T)";
     }else{
       taskStartedAt=null;taskEndsAt=null;taskPaused=false;
-      startTaskButton.disabled=false;finishTaskButton.disabled=true;
+      toggleTaskButton.textContent="Rozpocznij TASK (T)";
     }
     monitorStartedAt=lastPressTime||Date.now();
     hasRegisteredPress=lastPressTime!==null;
